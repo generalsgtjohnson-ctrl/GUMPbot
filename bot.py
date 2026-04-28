@@ -7,7 +7,7 @@ from database import init_db, get_group_for_channel, get_channels_in_group, \
     get_languages, get_config, get_language_by_role
 from translator import Translator, get_language_info
 from setup_commands import (
-    run_setup, cmd_add_channel, cmd_add_language, LanguagePickerView, get_languages
+    run_setup, cmd_add_channel, cmd_add_language, cmd_cleanup, LanguagePickerView, get_languages
 )
 
 # ── Discord setup ─────────────────────────────────────────────────────────────
@@ -15,13 +15,18 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 
+GUILD_ID = discord.Object(id=1280966365175615498)
+
 class GUMPBot(discord.Client):
     def __init__(self):
         super().__init__(intents=intents)
         self.tree = app_commands.CommandTree(self)
 
     async def setup_hook(self):
-        await self.tree.sync()  # Global sync
+        # Sync directly to the server for instant command registration
+        self.tree.copy_global_to(guild=GUILD_ID)
+        await self.tree.sync(guild=GUILD_ID)
+        print(f"[GUMPbot] Commands synced to guild {GUILD_ID.id}")
 
     async def on_ready(self):
         init_db()
@@ -67,6 +72,11 @@ async def addchannel(interaction: discord.Interaction, channel: discord.TextChan
 @app_commands.checks.has_permissions(administrator=True)
 async def addlanguage(interaction: discord.Interaction, language: str):
     await cmd_add_language(interaction, language)
+
+@client.tree.command(name="cleanup", description="Delete all language channels and reset GUMPbot — keeps original channels")
+@app_commands.checks.has_permissions(administrator=True)
+async def cleanup(interaction: discord.Interaction):
+    await cmd_cleanup(interaction)
 
 # ── Events ────────────────────────────────────────────────────────────────────
 
