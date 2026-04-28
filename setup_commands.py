@@ -78,18 +78,18 @@ async def run_setup(interaction: discord.Interaction, languages: list[str]):
 
     status_messages = []
 
-    # ── Step 1: Create roles ──────────────────────────────────────────────────
+    # ââ Step 1: Create roles ââââââââââââââââââââââââââââââââââââââââââââââââââ
     lang_roles: dict[str, discord.Role] = {}
     for lang_code in languages:
         role = await create_language_role(guild, lang_code)
         lang_roles[lang_code] = role
         info = get_language_info(lang_code)
         add_language(lang_code, info["name"], info["flag"], role.id)
-        status_messages.append(f"✅ Created role: {info['flag']} {info['name']} Speaker")
+        status_messages.append(f"â Created role: {info['flag']} {info['name']} Speaker")
 
     all_roles = list(lang_roles.values())
 
-    # ── Step 2: Scan existing channels ───────────────────────────────────────
+    # ââ Step 2: Scan existing channels âââââââââââââââââââââââââââââââââââââââ
     text_channels = [c for c in guild.channels if isinstance(c, discord.TextChannel)]
     universal = []
     to_clone = []
@@ -107,9 +107,9 @@ async def run_setup(interaction: discord.Interaction, languages: list[str]):
     for ch in universal:
         add_universal_channel(ch.id)
         await set_channel_permissions(ch, all_roles, None, default_role, is_universal=True)
-        status_messages.append(f"🌐 Universal: #{ch.name}")
+        status_messages.append(f"ð Universal: #{ch.name}")
 
-    # ── Step 3: Clone channels per language ───────────────────────────────────
+    # ââ Step 3: Clone channels per language âââââââââââââââââââââââââââââââââââ
     for ch in to_clone:
         group_id = str(uuid.uuid4())
 
@@ -137,13 +137,13 @@ async def run_setup(interaction: discord.Interaction, languages: list[str]):
                     new_ch, all_roles, lang_roles[lang_code], default_role
                 )
                 add_channel_to_group(group_id, new_ch.id, lang_code)
-                status_messages.append(f"✅ Created #{new_name}")
+                status_messages.append(f"â Created #{new_name}")
             except Exception as e:
-                status_messages.append(f"❌ Failed to create #{new_name}: {e}")
+                status_messages.append(f"â Failed to create #{new_name}: {e}")
 
-    # ── Step 4: Create language picker channel ────────────────────────────────
+    # ââ Step 4: Create language picker channel ââââââââââââââââââââââââââââââââ
     picker_ch = await guild.create_text_channel(
-        name="🌐・pick-your-language",
+        name="ðã»pick-your-language",
         position=0
     )
     # Make picker visible to everyone
@@ -154,9 +154,9 @@ async def run_setup(interaction: discord.Interaction, languages: list[str]):
     add_universal_channel(picker_ch.id)
 
     await post_language_picker(picker_ch)
-    status_messages.append(f"✅ Created language picker: #{picker_ch.name}")
+    status_messages.append(f"â Created language picker: #{picker_ch.name}")
 
-    # ── Step 5: Update @everyone so they default to English ──────────────────
+    # ââ Step 5: Update @everyone so they default to English ââââââââââââââââââ
     # Hide all language channels from @everyone (already done above)
     # Give @everyone the English role by default via a welcome message instead
     set_config("default_lang", languages[0])
@@ -177,7 +177,7 @@ async def post_language_picker(channel: discord.TextChannel):
 
     view = LanguagePickerView(languages)
     embed = discord.Embed(
-        title="🌐 Choose Your Language",
+        title="ð Choose Your Language",
         description="Click your native language below to see the server in your language.\n\nYou can change it anytime by clicking a different button.",
         color=0x5865F2
     )
@@ -257,9 +257,9 @@ async def cmd_add_channel(interaction: discord.Interaction, channel: discord.Tex
             )
             await set_channel_permissions(new_ch, all_roles, role, default_role)
             add_channel_to_group(group_id, new_ch.id, lang["code"])
-            created.append(f"✅ #{new_name}")
+            created.append(f"â #{new_name}")
         except Exception as e:
-            created.append(f"❌ #{new_name}: {e}")
+            created.append(f"â #{new_name}: {e}")
 
     await interaction.followup.send(
         f"Channel group created for #{channel.name}:\n" + "\n".join(created),
@@ -307,9 +307,9 @@ async def cmd_add_language(interaction: discord.Interaction, lang_code: str):
             )
             await set_channel_permissions(new_ch, all_roles, role, default_role)
             add_channel_to_group(group_id, new_ch.id, lang_code)
-            created.append(f"✅ #{new_name}")
+            created.append(f"â #{new_name}")
         except Exception as e:
-            created.append(f"❌ #{new_name}: {e}")
+            created.append(f"â #{new_name}: {e}")
 
     # Update language picker
     picker_id = get_config("picker_channel_id")
