@@ -21,7 +21,25 @@ class GUMPBot(discord.Client):
         self.tree = app_commands.CommandTree(self)
 
     async def setup_hook(self):
-        await self.tree.sync()
+        await self.tree.sync()  # Global sync
+
+    async def on_ready(self):
+        init_db()
+        # Force sync to every guild for instant slash command availability
+        for guild in self.guilds:
+            try:
+                self.tree.copy_global_to(guild=guild)
+                await self.tree.sync(guild=guild)
+                print(f"[GUMPbot] Synced commands to guild: {guild.name}")
+            except Exception as e:
+                print(f"[GUMPbot] Failed to sync to guild {guild.name}: {e}")
+
+        # Re-register persistent language picker views
+        languages = get_languages()
+        if languages:
+            self.add_view(LanguagePickerView(languages))
+
+        print(f"[GUMPbot] Online as {self.user} ({self.user.id})")
 
 client = GUMPBot()
 translator = Translator()
@@ -51,16 +69,6 @@ async def addlanguage(interaction: discord.Interaction, language: str):
     await cmd_add_language(interaction, language)
 
 # ── Events ────────────────────────────────────────────────────────────────────
-
-@client.event
-async def on_ready():
-    init_db()
-    # Re-register persistent language picker views so buttons work after restart
-    languages = get_languages()
-    if languages:
-        client.add_view(LanguagePickerView(languages))
-
-    print(f"[GUMPbot] Online as {client.user} ({client.user.id})")
 
 @client.event
 async def on_member_join(member: discord.Member):
