@@ -323,3 +323,80 @@ async def cmd_add_language(interaction: discord.Interaction, lang_code: str):
         f"{info['flag']} **{info['name']}** added!\n\n" + "\n".join(created),
         ephemeral=True
     )
+
+async def cmd_cleanup(interaction: discord.Interaction):
+    """
+    Delete all language-suffixed channels and reset the database.
+    Keeps all original channels intact.
+    """
+    await interaction.response.defer(ephemeral=True)
+    guild = interaction.guild
+    languages = get_languages()
+
+    # Build list of known language suffixes
+    lang_codes = [l["code"] for l in languages] if languages else []
+
+    # Also catch common suffixes even if DB is empty
+    # by scanning for any channel ending in -xx (2-letter code)
+    import re
+    suffix_pattern = re.compile(r'-[a-z]{2}(-[a-z]{2})*$')
+
+    deleted = []
+    skipped = []
+
+    text_channels = [c for c in guild.channels if isinstance(c, discord.TextChannel)]
+
+    for ch in text_channels:
+        name = ch.name.lower()
+        # Delete if name ends with a language suffix pattern like -fr, -ar, -fr-ar
+        if suffix_pattern.search(name):
+            try:
+                await ch.delete(reason="GUMPbot cleanup")
+                deleted.append(f"ðï¸ #{ch.name}")
+            except discord.Forbidden:
+                skipped.append(f"â ï¸ #{ch.name} (no permission)")
+            except Exception as e:
+                skipped.append(f"â #{ch.name}: {e}")
+
+    # Also delete the language picker channel
+    picker_id = get_config("picker_channel_id")
+    if picker_id:
+        picker_ch = guild.get_channel(int(picker_id))
+        if picker_ch:
+            try:
+                await picker_ch.delete(reason="GUMPbot cleanup")
+                deleted.append(f"ðï¸ #{picker_ch.name}")
+            except Exception:
+                pass
+
+    # Reset the database
+    import sqlite3
+    from database import DB_PATH
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("DELETE FROM channel_groups")
+    conn.execute("DELETE FROM universal_channels")
+    conn.execute("DELETE FROM languages")
+    conn.execute("DELETE FROM message_map")
+    conn.execute("DELETE FROM config")
+    conn.commit()
+    conn.close()
+
+    # Delete language roles
+    for lang in languages:
+        role = guild.get_role(lang["role_id"])
+        if role:
+            try:
+                await role.delete(reason="GUMPbot cleanup")
+                deleted.append(f"ðï¸ Role: {lang['flag']} {lang['name']} Speaker")
+            except Exception:
+                pass
+
+    summary = "\n".join(deleted) if deleted else "Nothing to delete."
+    if skipped:
+        summary += "\n\n**Skipped:**\n" + "\n".join(skipped)
+
+    await interaction.followup.send(
+        f"**Cleanup complete!** Server reset to original channels.\n\n{summary}\n\n"
+        f"Run `/setup languages:en,fr` when ready to set up again.",
+        ephemeral=True
+    )
