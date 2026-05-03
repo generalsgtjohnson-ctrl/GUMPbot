@@ -39,21 +39,28 @@ async def set_channel_permissions(
     """
     Set permissions on a language channel:
     - Universal channels: visible to everyone
-    - Language channels: visible only to own_role (and hidden from default_role + other lang roles)
+    - Language channels: copies existing permissions, adds language role visibility on top
+      so users need BOTH existing role AND language role to see the channel
     """
-    overwrites = {}
-
     if is_universal:
+        overwrites = dict(channel.overwrites)
         overwrites[default_role] = discord.PermissionOverwrite(read_messages=True)
-    else:
-        # Hide from @everyone by default
-        overwrites[default_role] = discord.PermissionOverwrite(read_messages=False)
-        # Show to own language role
-        overwrites[own_role] = discord.PermissionOverwrite(read_messages=True)
-        # Explicitly hide from other language roles
-        for role in lang_roles:
-            if role.id != own_role.id:
-                overwrites[role] = discord.PermissionOverwrite(read_messages=False)
+        await channel.edit(overwrites=overwrites)
+        return
+
+    # Start with a copy of the original channel's existing permission overwrites
+    overwrites = dict(channel.overwrites)
+
+    # Hide from @everyone by default
+    overwrites[default_role] = discord.PermissionOverwrite(read_messages=False)
+
+    # Show to own language role (only if no existing restrictions prevent it)
+    overwrites[own_role] = discord.PermissionOverwrite(read_messages=True)
+
+    # Explicitly hide from other language roles
+    for role in lang_roles:
+        if role.id != own_role.id:
+            overwrites[role] = discord.PermissionOverwrite(read_messages=False)
 
     await channel.edit(overwrites=overwrites)
 
@@ -126,15 +133,24 @@ async def run_setup(interaction: discord.Interaction, languages: list[str]):
             info = get_language_info(lang_code)
             topic = f"{info['flag']} {info['name']} version of #{ch.name}"
 
+            # Start with the original channel's existing overwrites
+            base_overwrites = dict(ch.overwrites)
+            # Hide from @everyone
+            base_overwrites[default_role] = discord.PermissionOverwrite(read_messages=False)
+            # Show to this language role
+            base_overwrites[lang_roles[lang_code]] = discord.PermissionOverwrite(read_messages=True)
+            # Hide from all other language roles
+            for lr_code, lr in lang_roles.items():
+                if lr_code != lang_code:
+                    base_overwrites[lr] = discord.PermissionOverwrite(read_messages=False)
+
             try:
                 new_ch = await guild.create_text_channel(
                     name=new_name,
                     category=ch.category,
                     topic=topic,
-                    position=ch.position + 1
-                )
-                await set_channel_permissions(
-                    new_ch, all_roles, lang_roles[lang_code], default_role
+                    position=ch.position + 1,
+                    overwrites=base_overwrites
                 )
                 add_channel_to_group(group_id, new_ch.id, lang_code)
                 status_messages.append(f"â Created #{new_name}")
