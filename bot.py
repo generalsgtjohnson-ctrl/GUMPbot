@@ -4,10 +4,11 @@ import os
 
 from database import init_db, get_group_for_channel, get_channels_in_group, \
     is_mirrored_message, save_mapping, get_mirrors, is_universal, \
-    get_languages, get_config, get_language_by_role
+    get_languages, get_config
 from translator import Translator, get_language_info
 from setup_commands import (
-    run_setup, cmd_add_channel, cmd_add_language, cmd_cleanup, LanguagePickerView, get_languages
+    run_setup, cmd_add_channel, cmd_add_language, cmd_cleanup,
+    LanguagePickerView, get_languages
 )
 
 # ── Discord setup ─────────────────────────────────────────────────────────────
@@ -15,35 +16,34 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 
-GUILD_ID = discord.Object(id=1280966365175615498)
-
 class GUMPBot(discord.Client):
     def __init__(self):
         super().__init__(intents=intents)
         self.tree = app_commands.CommandTree(self)
 
     async def setup_hook(self):
-        # Sync directly to the server for instant command registration
-        self.tree.copy_global_to(guild=GUILD_ID)
-        await self.tree.sync(guild=GUILD_ID)
-        print(f"[GUMPbot] Commands synced to guild {GUILD_ID.id}")
-
-    async def on_ready(self):
-        init_db()
-        # Force sync to every guild for instant slash command availability
+        # Sync commands to all guilds the bot is in
         for guild in self.guilds:
             try:
                 self.tree.copy_global_to(guild=guild)
                 await self.tree.sync(guild=guild)
-                print(f"[GUMPbot] Synced commands to guild: {guild.name}")
+                print(f"[GUMPbot] Commands synced to guild: {guild.name}")
             except Exception as e:
-                print(f"[GUMPbot] Failed to sync to guild {guild.name}: {e}")
+                print(f"[GUMPbot] Failed to sync to {guild.name}: {e}")
 
-        # Re-register persistent language picker views
-        languages = get_languages()
-        if languages:
-            self.add_view(LanguagePickerView(languages))
-
+    async def on_ready(self):
+        init_db()
+        # Re-register persistent views for all guilds
+        for guild in self.guilds:
+            languages = get_languages(guild.id)
+            if languages:
+                self.add_view(LanguagePickerView(languages))
+            # Sync commands to any new guilds
+            try:
+                self.tree.copy_global_to(guild=guild)
+                await self.tree.sync(guild=guild)
+            except Exception:
+                pass
         print(f"[GUMPbot] Online as {self.user} ({self.user.id})")
 
 client = GUMPBot()
@@ -52,7 +52,7 @@ translator = Translator()
 # ── Slash commands ────────────────────────────────────────────────────────────
 
 @client.tree.command(name="setup", description="Set up GUMPbot — clone channels and configure languages")
-@app_commands.describe(languages="Comma-separated language codes, e.g: en,fr,es")
+@app_commands.describe(languages="Comma-separated language codes, e.g: en,fr,es,ar")
 @app_commands.checks.has_permissions(administrator=True)
 async def setup(interaction: discord.Interaction, languages: str = "en,fr"):
     lang_list = [l.strip().lower() for l in languages.split(",") if l.strip()]
@@ -73,7 +73,7 @@ async def addchannel(interaction: discord.Interaction, channel: discord.TextChan
 async def addlanguage(interaction: discord.Interaction, language: str):
     await cmd_add_language(interaction, language)
 
-@client.tree.command(name="cleanup", description="Delete all language channels and reset GUMPbot — keeps original channels")
+@client.tree.command(name="cleanup", description="Delete all language channels and reset GUMPbot")
 @app_commands.checks.has_permissions(administrator=True)
 async def cleanup(interaction: discord.Interaction):
     await cmd_cleanup(interaction)
@@ -81,10 +81,21 @@ async def cleanup(interaction: discord.Interaction):
 # ── Events ────────────────────────────────────────────────────────────────────
 
 @client.event
+async def on_guild_join(guild: discord.Guild):
+    """Sync commands when the bot joins a new server."""
+    try:
+        client.tree.copy_global_to(guild=guild)
+        await client.tree.sync(guild=guild)
+        print(f"[GUMPbot] Joined and synced commands to: {guild.name}")
+    except Exception as e:
+        print(f"[GUMPbot] Failed to sync to new guild {guild.name}: {e}")
+
+@client.event
 async def on_member_join(member: discord.Member):
     """Assign default language role to new members."""
-    default_lang = get_config("default_lang") or "en"
-    languages = get_languages()
+    guild_id = member.guild.id
+    default_lang = get_config(guild_id, "default_lang") or "en"
+    languages = get_languages(guild_id)
     default = next((l for l in languages if l["code"] == default_lang), None)
     if default:
         role = member.guild.get_role(default["role_id"])
@@ -97,7 +108,12 @@ async def on_message(message: discord.Message):
         return
     if not message.content or not message.content.strip():
         return
-    if is_universal(message.channel.id):
+
+    guild_id = message.guild.id if message.guild else None
+    if not guild_id:
+        return
+
+    if is_universal(guild_id, message.channel.id):
         return
 
     group_id = get_group_for_channel(message.channel.id)
@@ -114,7 +130,6 @@ async def on_message(message: discord.Message):
     if not source_lang:
         return
 
-    # Determine if this is a reply
     reply_to_id = None
     if message.reference and message.reference.message_id:
         reply_to_id = message.reference.message_id
@@ -131,7 +146,6 @@ async def on_message(message: discord.Message):
 
         target_lang = sibling["language"]
         tgt_info = get_language_info(target_lang)
-
         translated = translator.translate(message.content, target_lang)
         formatted = (
             f"{src_info['flag']}→{tgt_info['flag']} "
@@ -149,14 +163,11 @@ async def on_message(message: discord.Message):
                         sent = await parent_msg.reply(formatted)
                     except discord.NotFound:
                         pass
-
             if not sent:
                 sent = await target_ch.send(formatted)
-
             save_mapping(message.channel.id, message.id, sibling["channel_id"], sent.id)
-
         except discord.Forbidden:
-            print(f"[GUMPbot] No permission to send in {sibling['channel_id']}")
+            print(f"[GUMPbot] No permission in {sibling['channel_id']}")
         except Exception as e:
             print(f"[GUMPbot] Mirror error: {e}")
 
